@@ -221,13 +221,9 @@ class CP2K(Calculator):
         if(len(pbc)==0): pbc = "NONE"
         root.add_keyword("FORCE_EVAL/SUBSYS/CELL", "PERIODIC "+pbc)
         cell = self.atoms.get_cell()
-        line = "A  %.10f   %.10f   %.10f"%(cell[0,0], cell[0,1], cell[0,2])
-        root.add_keyword("FORCE_EVAL/SUBSYS/CELL", line)
-        line = "B  %.10f   %.10f   %.10f"%(cell[1,0], cell[1,1], cell[1,2])
-        root.add_keyword("FORCE_EVAL/SUBSYS/CELL", line)
-        line = "C  %.10f   %.10f   %.10f"%(cell[2,0], cell[2,1], cell[2,2])
-        root.add_keyword("FORCE_EVAL/SUBSYS/CELL", line)
-
+        for i, a in enumerate("ABC"):
+            line = "%s  %.10f   %.10f   %.10f"%(a, cell[i,0], cell[i,1], cell[i,2])
+            root.add_keyword("FORCE_EVAL/SUBSYS/CELL", line)
 
         # determine pseudo-potential
         potential = p.pseudo_potential
