@@ -33,15 +33,21 @@ class CP2K(Calculator):
         potential_file = "POTENTIAL",
         max_scf = 50,
         cutoff = 400 * Rydberg,
-        charge = 0)
+        charge = 0,
+        print_level = 'MEDIUM',
+        vdw = 'NONE',
+        pair_potential = 'DFTD3',
+        vdw_parameter_file = 'dftd3.dat',
+    )
 
 
     #---------------------------------------------------------------------------
     def __init__(self, restart=None, ignore_bad_restart_file=False,
-                 label='project001', atoms=None, debug=False, **kwargs):
+                 label='project001', atoms=None, debug=False, save_input=True, **kwargs):
         """Construct CP2K-calculator object."""
 
         self._debug  = debug
+        self._save_input = save_input
         self._force_env_id = None
         self._child  = None
 
@@ -166,6 +172,11 @@ class CP2K(Calculator):
 
         if(self._debug):
             print inp
+        if(self._save_input):
+            fname = self.parameters.txt + '.inp'
+            f = open(fname, "w")
+            f.write(inp)
+            f.close()
         fd, inp_fn = mkstemp(suffix=".inp")
         f = os.fdopen(fd, "w")
         f.write(inp)
@@ -198,6 +209,7 @@ class CP2K(Calculator):
 
         root = parse_input("")
         root.add_keyword("GLOBAL", "PROJECT "+self.label)
+        root.add_keyword("GLOBAL", "PRINT_LEVEL "+p.print_level)
         root.add_keyword("FORCE_EVAL", "METHOD Quickstep")
         root.add_keyword("FORCE_EVAL", "STRESS_TENSOR ANALYTICAL")
         root.add_keyword("FORCE_EVAL/PRINT/STRESS_TENSOR", "_SECTION_PARAMETERS_ ON")
@@ -206,6 +218,8 @@ class CP2K(Calculator):
         root.add_keyword("FORCE_EVAL/DFT/XC/XC_FUNCTIONAL", "_SECTION_PARAMETERS_ "+p.xc)
         root.add_keyword("FORCE_EVAL/DFT/MGRID", "CUTOFF [eV] %.3f"%p.cutoff)
         root.add_keyword("FORCE_EVAL/DFT/SCF",  "MAX_SCF %d"%p.max_scf)
+        root.add_keyword("FORCE_EVAL/DFT/SCF/OT",  "PRECONDITIONER FULL_SINGLE_INVERSE")
+        root.add_keyword("FORCE_EVAL/DFT/SCF/OT",  "MINIMIZER CG")
 
         if(any(self.atoms.get_initial_magnetic_moments()!=0)):
             raise(NotImplementedError("Magmetic moments not implemented"))
@@ -217,6 +231,12 @@ class CP2K(Calculator):
             raise(Exception("Section SUBSYS exists already"))
 
         valence_electrons = self._parse_basis_set()
+
+        root.add_keyword("FORCE_EVAL/DFT/XC/VDW_POTENTIAL", "POTENTIAL_TYPE "+p.vdw)
+        root.add_keyword("FORCE_EVAL/DFT/XC/VDW_POTENTIAL/PAIR_POTENTIAL", "TYPE "+p.pair_potential)
+        root.add_keyword("FORCE_EVAL/DFT/XC/VDW_POTENTIAL/PAIR_POTENTIAL", "PARAMETER_FILE_NAME "+p.vdw_parameter_file)
+        root.add_keyword("FORCE_EVAL/DFT/XC/VDW_POTENTIAL/PAIR_POTENTIAL", "REFERENCE_FUNCTIONAL PBE")
+
 
         # write coords
         n_electrons = 0
