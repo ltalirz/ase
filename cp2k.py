@@ -55,7 +55,8 @@ class CP2K(Calculator):
                                   label, atoms, **kwargs)
 
         # launch cp2k_shell child process
-        self._pipe_fn = mktemp(prefix='cp2k_shell_', suffix=".fifo")
+        #self._pipe_fn = mktemp(prefix='cp2k_shell_', suffix=".fifo")
+        self._pipe_fn = mktemp(prefix='cp2k_shell_', suffix=".fifo", dir=os.getcwd())
         os.mkfifo(self._pipe_fn)
         cmd = self.command + " --redirect-comm="+self._pipe_fn
         if(self._debug): print cmd
