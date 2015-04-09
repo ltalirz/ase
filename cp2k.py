@@ -5,21 +5,17 @@ http://www.cp2k.org
 Author: Ole Schütt <ole.schuett@mat.ethz.ch>
 '''
 
-import sys
 import os
-import re
-import numpy as np
-from os import path
+import os.path
+from warnings import warn
 from subprocess import Popen, PIPE
-from tempfile import mkstemp, mktemp
-
+import numpy as np
 import ase.io
-from ase import Atoms
 from ase.units import Rydberg, Hartree, Bohr
 from ase.calculators.calculator import Calculator, all_changes, Parameters
 
 
-#==============================================================================
+#=============================================================================
 class CP2K(Calculator):
     '''Class for doing CP2K calculations.'''
 
@@ -37,7 +33,7 @@ class CP2K(Calculator):
         charge=0,
         inp='')
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def __init__(self, label='project001', restart=None,
                  ignore_bad_restart_file=False, atoms=None, debug=False,
                  **kwargs):
@@ -46,6 +42,10 @@ class CP2K(Calculator):
         self._debug = debug
         self._force_env_id = None
         self._child = None
+        self.label = None
+        self.parameters = None
+        self.results = None
+        self.atoms = None
 
         Calculator.__init__(self, restart, ignore_bad_restart_file,
                                   label, atoms, **kwargs)
@@ -57,7 +57,7 @@ class CP2K(Calculator):
         self._child = Popen(cmd, stdin=PIPE, stdout=PIPE, bufsize=1)
         assert(self._recv() == '* READY')
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def __del__(self):
         '''Release force_env and terminate cp2k_shell child process'''
         self._release_force_env()
@@ -66,42 +66,45 @@ class CP2K(Calculator):
             assert(self._child.wait() == 0)  # child process exited properly?
             self._child = None
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def reset(self):
         '''Clear all information from old calculation.'''
         Calculator.reset(self)
         self._release_force_env()
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def set(self, **kwargs):
         '''Set parameters like set(key1=value1, key2=value2, ...).'''
         changed_parameters = Calculator.set(self, **kwargs)
         if(changed_parameters):
             self.reset()
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def write(self, label):
         'Write atoms, parameters and calculated results into restart files.'
         self.atoms.write(label + '_restart.traj')
         self.parameters.write(label + '_params.ase')
         open(label + '_results.ase', 'w').write(repr(self.results))
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def read(self, label):
         'Read atoms, parameters and calculated results from restart files.'
-        from numpy import array
+        from numpy import array  # needed by eval(<label_results.ase>)
         self.atoms = ase.io.read(label + '_restart.traj')
         self.parameters = Parameters.read(label + '_params.ase')
         self.results = eval(open(label + '_results.ase').read())
 
-    #--------------------------------------------------------------------------
-    def calculate(self, atoms=None, properties=['energy'],
+    #-------------------------------------------------------------------------
+    def calculate(self, atoms=None, properties=None,
                   system_changes=all_changes):
         '''Do the calculation.'''
 
+        if(not properties):
+            properties = ['energy']
         Calculator.calculate(self, atoms, properties, system_changes)
 
-        if('numbers' in system_changes or 'initial_magmoms' in system_changes):
+        if('numbers' in system_changes or
+           'initial_magmoms' in system_changes):
             self._release_force_env()
 
         if(self._force_env_id is None):
@@ -151,11 +154,12 @@ class CP2K(Calculator):
                            stress[1, 2], stress[0, 2], stress[0, 1]])
         self.results['stress'] = stress * Hartree / Bohr**3
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def _create_force_env(self):
+        '''Instantiates a new force-environment'''
         assert(self._force_env_id is None)
-        label_dir = path.dirname(self.label)
-        if(len(label_dir) > 0 and not path.exists(label_dir)):
+        label_dir = os.path.dirname(self.label)
+        if(len(label_dir) > 0 and not os.path.exists(label_dir)):
             print('Creating directory: ' + label_dir)
             os.makedirs(label_dir)  # cp2k expects dirs to exist
 
@@ -173,15 +177,17 @@ class CP2K(Calculator):
         assert(self._force_env_id > 0)
         assert(self._recv() == '* READY')
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def _release_force_env(self):
+        '''Destroys the current force-environment'''
         if(self._force_env_id):
             self._send('DESTROY %d' % self._force_env_id)
             assert(self._recv() == '* READY')
             self._force_env_id = None
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def _generate_input(self):
+        '''Generates a CP2K input file'''
         p = self.parameters
         root = parse_input(p.inp)
         root.add_keyword('GLOBAL',
@@ -214,11 +220,10 @@ class CP2K(Calculator):
             raise(Exception('Section SUBSYS exists already'))
 
         # write coords
-        n_electrons = 0
         syms = self.atoms.get_chemical_symbols()
         atoms = self.atoms.get_positions()
-        for elem, pos in zip(syms, atoms):
-            line = '%s  %.10f   %.10f   %.10f' % (elem, pos[0], pos[1], pos[2])
+        for elm, pos in zip(syms, atoms):
+            line = '%s  %.10f   %.10f   %.10f' % (elm, pos[0], pos[1], pos[2])
             root.add_keyword('FORCE_EVAL/SUBSYS/COORD', line, unique=False)
 
         # write cell
@@ -228,7 +233,7 @@ class CP2K(Calculator):
         root.add_keyword('FORCE_EVAL/SUBSYS/CELL', 'PERIODIC ' + pbc)
         c = self.atoms.get_cell()
         for i, a in enumerate('ABC'):
-            line = '%s  %.10f   %.10f   %.10f' % (a, c[i, 0], c[i, 1], c[i, 2])
+            line = '%s  %.10f  %.10f  %.10f' % (a, c[i, 0], c[i, 1], c[i, 2])
             root.add_keyword('FORCE_EVAL/SUBSYS/CELL', line)
 
         # determine pseudo-potential
@@ -252,7 +257,7 @@ class CP2K(Calculator):
         output_lines = ['!!! Generated by ASE !!!'] + root.write()
         return('\n'.join(output_lines))
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def _send(self, line):
         '''Send a line to the cp2k_shell'''
         assert(self._child.poll() is None)  # child process still alive?
@@ -260,7 +265,7 @@ class CP2K(Calculator):
             print('Sending: ' + line)
         self._child.stdin.write(line + '\n')
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def _recv(self):
         '''Receive a line from the cp2k_shell'''
         assert(self._child.poll() is None)  # child process still alive?
@@ -270,16 +275,18 @@ class CP2K(Calculator):
         return(line)
 
 
-#==============================================================================
+#=============================================================================
 class InputSection(object):
+    '''Represents a section of a CP2K input file'''
     def __init__(self, name, params=None):
         self.name = name.upper()
         self.params = params
         self.keywords = []
         self.subsections = []
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def write(self):
+        '''Outputs input section as string'''
         output = []
         for k in self.keywords:
             output.append(k)
@@ -293,8 +300,9 @@ class InputSection(object):
             output.append('&END %s' % s.name)
         return(output)
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def add_keyword(self, path, line, unique=True):
+        '''Adds a keyword to section.'''
         parts = path.upper().split('/', 1)
         candidates = [s for s in self.subsections if s.name == parts[0]]
         if(len(candidates) == 0):
@@ -319,8 +327,9 @@ class InputSection(object):
                 raise(Exception(msg % (key, parts[0])))
             candidates[0].keywords.append(line)
 
-    #--------------------------------------------------------------------------
+    #-------------------------------------------------------------------------
     def get_subsection(self, path):
+        '''Finds a subsection'''
         parts = path.upper().split('/', 1)
         candidates = [s for s in self.subsections if s.name == parts[0]]
         if(len(candidates) > 1):
@@ -332,8 +341,9 @@ class InputSection(object):
         return(candidates[0].get_subsection(parts[1]))
 
 
-#==============================================================================
+#=============================================================================
 def parse_input(inp):
+    '''Parses the given CP2K input string'''
     root_section = InputSection('CP2K_INPUT')
     section_stack = [root_section]
 

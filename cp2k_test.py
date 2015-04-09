@@ -7,15 +7,13 @@ http://www.cp2k.org
 Author: Ole Schütt <ole.schuett@mat.ethz.ch>
 """
 
-from ase.test import NotAvailable
 from ase.structure import molecule
-from ase.calculators.calculator import get_calculator
-from ase.units import GPa, Pascal, Hartree
+from ase.units import Hartree
 from ase.optimize import BFGS
 from cp2k import CP2K
 
 
-#==============================================================================
+#=============================================================================
 def test_H2_LDA():
     calc = CP2K(label='test_H2_LDA')
     h2 = molecule('H2', calculator=calc)
@@ -26,7 +24,7 @@ def test_H2_LDA():
     print('passed test "H2_LDA"')
 
 
-#==============================================================================
+#=============================================================================
 def test_H2_PBE():
     calc = CP2K(xc='PBE', label='test_H2_PBE')
     h2 = molecule('H2', calculator=calc)
@@ -37,7 +35,7 @@ def test_H2_PBE():
     print('passed test "H2_PBE"')
 
 
-#==============================================================================
+#=============================================================================
 def test_H2_LS():
     inp = """&FORCE_EVAL
                &DFT
@@ -55,7 +53,7 @@ def test_H2_LS():
     print('passed test "H2_LS"')
 
 
-#==============================================================================
+#=============================================================================
 def test_O2():
     calc = CP2K(label='test_O2')
     o2 = molecule('O2', calculator=calc)
@@ -66,7 +64,7 @@ def test_O2():
     print('passed test "O2"')
 
 
-#==============================================================================
+#=============================================================================
 def test_restart():
     calc = CP2K()
     h2 = molecule('H2', calculator=calc)
@@ -78,7 +76,7 @@ def test_restart():
     print('passed test "restart"')
 
 
-#==============================================================================
+#=============================================================================
 def test_geopt():
     calc = CP2K(label='test_geopt')
     h2 = molecule('H2', calculator=calc)
@@ -91,7 +89,7 @@ def test_geopt():
     print('passed test "geopt"')
 
 
-#==============================================================================
+#=============================================================================
 def main():
     CP2K.command = 'mpiexec -np 2 ./cp2k_shell.pdbg'
 
