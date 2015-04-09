@@ -1,84 +1,100 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+"""Test suit for the CP2K ASE calulator.
+
+http://www.cp2k.org
+Author: Ole Schütt <ole.schuett@mat.ethz.ch>
+"""
+
 from ase.test import NotAvailable
 from ase.structure import molecule
 from ase.calculators.calculator import get_calculator
 from ase.units import GPa, Pascal, Hartree
+from ase.optimize import BFGS
+
 from cp2k import CP2K
 
 #===============================================================================
-def test_LDA():
-    calc = CP2K(xc='LDA', txt='test_LDA.out')
+def test_H2_LDA():
+    calc = CP2K(label="test_H2_LDA")
     h2 = molecule('H2', calculator=calc)
     h2.center(vacuum=2.0)
     energy = h2.get_potential_energy()/Hartree
-    print "Energy [Ha]:", energy
-    #print "Stress [GPa]:", h2.get_stress(voigt=False)/GPa
     diff = abs((energy + 0.932722287302)/energy)
-    print "Diff:", diff
-    assert(diff < 1e-12)
+    assert(diff < 1e-10)
+    print("passed test 'H2_LDA'")
 
 #===============================================================================
-def test_PBE():
-    calc = CP2K(xc='PBE', txt='test_PBE.out')
+def test_H2_PBE():
+    calc = CP2K(xc='PBE', label="test_H2_PBE")
     h2 = molecule('H2', calculator=calc)
     h2.center(vacuum=2.0)
     energy = h2.get_potential_energy()/Hartree
-    print "Energy [Ha]:", energy
-    #print "Stress [GPa]:", h2.get_stress(voigt=False)/GPa
     diff = abs((energy + 0.961680073441)/energy)
-    print "Diff:", diff
-    assert(diff < 1e-12)
+    assert(diff < 1e-10)
+    print("passed test 'H2_PBE'")
+
+#===============================================================================
+def test_H2_LS():
+    inp = """&FORCE_EVAL
+               &DFT
+                 &QS
+                   LS_SCF ON
+                 &END QS
+               &END DFT
+             &END FORCE_EVAL"""
+    calc = CP2K(label="test_H2_LS", inp=inp)
+    h2 = molecule('H2', calculator=calc)
+    h2.center(vacuum=2.0)
+    energy = h2.get_potential_energy()/Hartree
+    diff = abs((energy + 0.932722212414)/energy)
+    assert(diff < 1e-10)
+    print("passed test 'H2_LS'")
+
+#===============================================================================
+def test_O2():
+    calc = CP2K(label="test_O2")
+    o2 = molecule('O2', calculator=calc)
+    o2.center(vacuum=2.0)
+    energy = o2.get_potential_energy()/Hartree
+    diff = abs((energy + 29.669802288970264)/energy)
+    assert(diff < 1e-10)
+    print("passed test 'O2'")
+
+#===============================================================================
+def test_restart():
+    calc = CP2K()
+    h2 = molecule('H2', calculator=calc)
+    h2.center(vacuum=2.0)
+    h2.get_potential_energy()
+    calc.write("test_restart") # write a restart
+    calc2 = CP2K(restart="test_restart") # load a restart
+    assert not calc2.calculation_required(h2, ['energy'])
+    print("passed test 'restart'")
+
+#===============================================================================
+def test_geopt():
+    calc = CP2K(label="test_geopt")
+    h2 = molecule('H2', calculator=calc)
+    h2.center(vacuum=2.0)
+    dyn = BFGS(h2)
+    dyn.run(fmax=0.05)
+    dist = h2.get_distance(0, 1)
+    diff = abs(dist - 1.36733746519)
+    assert(diff < 1e-10)
+    print("passed test 'geopt'")
 
 #===============================================================================
 def main():
-    CP2K.command = "mpiexec -np 2 /data/schuetto/svn/cp2k/cp2k/exe/Linux/cp2k_shell.pdbg"
+    CP2K.command = "mpiexec -np 2 ./cp2k_shell.pdbg"
 
-    test_LDA()
-    test_PBE()
-
-    #TODO:
-    # - test different basis sets
-    # - test different XC
-    # - DFTB
-    # - Fist (e.g. geopt to test forces)
-    # - write/restart with label
-
-    ##calc = CP2K(label="somelabel", xc='LDA', max_scf=5, debug=False, txt="lala.out", basis_set='SZV-MOLOPT-SR-GTH')
-    #calc = CP2K(label="somelabel", xc='LDA', max_scf=5, debug=True, txt="lala.out", basis_set='SZV-MOLOPT-SR-GTH')
-    #h2 = molecule('H2', calculator=calc)
-    #h2.center(vacuum=2.0)
-    #e2 = h2.get_potential_energy()
-    #print "Energy: [eV] ", e2
-    #print "Energy: [Ha] ", e2/Hartree
-    #print h2.get_stress(voigt=False)/GPa
-    ##return
-    #calc.set(xc='PBE')
-    #e2pbe = h2.get_potential_energy()
-    #h1 = h2.copy()
-    #del h1[1]
-    #h1.set_initial_magnetic_moments([1])
-    #h1.calc = calc
-    #e1pbe = h1.get_potential_energy()
-    #calc.set(xc='LDA')
-    #e1 = h1.get_potential_energy()
-    #print(2 * e1 - e2)
-    #print(2 * e1pbe - e2pbe)
-    #print e1, e2, e1pbe, e2pbe
-
-    #calc.write() # write a restart
-    #calc2 = CP2K(name) # load a restart
-    #print calc.parameters, calc.results, calc.atoms
-    #assert not calc.calculation_required(h1, ['energy'])
-    #h1 = calc.get_atoms()
-    #
-    #print h1.get_potential_energy()
-    #label = 'dir/' + name + '-h1'
-    #calc = Calculator(label=label, atoms=h1, xc='LDA', **par)
-    #
-    #print h1.get_potential_energy()
-    #print Calculator.read_atoms(label).get_potential_energy()
+    test_H2_LDA()
+    test_H2_PBE()
+    test_H2_LS()
+    test_O2()
+    test_restart()
+    test_geopt()
 
 main()
 #EOF

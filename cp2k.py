@@ -21,24 +21,24 @@ from ase.calculators.calculator import Calculator, all_changes, Parameters, Read
 class CP2K(Calculator):
     """Class for doing CP2K calculations."""
 
-    implemented_properties = ['energy', 'forces', 'stress']
-    command = 'cp2k_shell.popt'
+    implemented_properties = ["energy", "forces", "stress"]
+    command = "cp2k_shell.popt"
 
     default_parameters = dict(
-        txt = "-",
-        xc = 'LDA',
-        basis_set = 'DZVP-MOLOPT-SR-GTH',
-        pseudo_potential = 'auto',
+        xc = "LDA",
+        basis_set = "DZVP-MOLOPT-SR-GTH",
+        pseudo_potential = "auto",
         basis_set_file = "BASIS_MOLOPT",
         potential_file = "POTENTIAL",
         max_scf = 50,
         cutoff = 400 * Rydberg,
-        charge = 0)
+        charge = 0,
+        inp = "")
 
 
     #---------------------------------------------------------------------------
-    def __init__(self, restart=None, ignore_bad_restart_file=False,
-                 label='project001', atoms=None, debug=False, **kwargs):
+    def __init__(self, label="project001", restart=None, ignore_bad_restart_file=False,
+                 atoms=None, debug=False, **kwargs):
         """Construct CP2K-calculator object."""
 
         self._debug  = debug
@@ -49,12 +49,8 @@ class CP2K(Calculator):
                                   label, atoms, **kwargs)
 
         # launch cp2k_shell child process
-        self._pipe_fn = mktemp(prefix='cp2k_shell_', suffix=".fifo")
-        os.mkfifo(self._pipe_fn)
-        cmd = self.command + " --redirect-comm="+self._pipe_fn
-        if(self._debug): print cmd
-        self._child = Popen(cmd.split(), stdin=PIPE, bufsize=1)
-        self._pipe = open(self._pipe_fn, "r")
+        if(self._debug): print self.command
+        self._child = Popen(self.command.split(), stdin=PIPE, stdout=PIPE, bufsize=1)
         assert(self._recv() == "* READY")
 
 
@@ -65,9 +61,7 @@ class CP2K(Calculator):
         if(self._child):
             self._send("EXIT")
             assert(self._child.wait() == 0) # child process exited properly?
-            self._pipe.close()
-            os.remove(self._pipe_fn)
-            self._child = self._pipe_fn = self._pipe = None
+            self._child = None
 
 
     #---------------------------------------------------------------------------
@@ -81,29 +75,29 @@ class CP2K(Calculator):
     def set(self, **kwargs):
         """Set parameters like set(key1=value1, key2=value2, ...)."""
         changed_parameters = Calculator.set(self, **kwargs)
-        if changed_parameters:
+        if(changed_parameters):
             self.reset()
 
 
     #---------------------------------------------------------------------------
     def write(self, label):
         """Write atoms, parameters and calculated properties into restart files."""
-        self.atoms.write(label + '_restart.traj')
-        self.parameters.write(label + '_params.ase')
-        open(label+'_results.ase', "w").write(repr(self.results))
+        self.atoms.write(label + "_restart.traj")
+        self.parameters.write(label + "_params.ase")
+        open(label+"_results.ase", "w").write(repr(self.results))
 
 
     #---------------------------------------------------------------------------
     def read(self, label):
         """Read atoms, parameters and calculated properties from restart files."""
         from numpy import array
-        self.atoms = ase.io.read(label+'_restart.traj')
-        self.parameters = Parameters.read(label + '_params.ase')
-        self.results = eval(open(label+'_results.ase').read())
+        self.atoms = ase.io.read(label+"_restart.traj")
+        self.parameters = Parameters.read(label+"_params.ase")
+        self.results = eval(open(label+"_results.ase").read())
 
 
     #---------------------------------------------------------------------------
-    def calculate(self, atoms=None, properties=['energy'], system_changes=all_changes):
+    def calculate(self, atoms=None, properties=["energy"], system_changes=all_changes):
         """Do the calculation."""
 
         Calculator.calculate(self, atoms, properties, system_changes)
@@ -134,7 +128,7 @@ class CP2K(Calculator):
         assert(self._recv() == "* READY")
 
         self._send("GET_E %d"%self._force_env_id)
-        self.results['energy'] = float(self._recv()) * Hartree
+        self.results["energy"] = float(self._recv()) * Hartree
         assert(self._recv() == "* READY")
 
         forces = np.zeros(shape=(n_atoms,3) )
@@ -145,7 +139,7 @@ class CP2K(Calculator):
             forces[i,:] = [float(x) for x in line.split()]
         assert(self._recv() == "* END")
         assert(self._recv() == "* READY")
-        self.results['forces'] = forces * Hartree / Bohr
+        self.results["forces"] = forces * Hartree / Bohr
 
         self._send("GET_STRESS %d"%self._force_env_id)
         line = self._recv()
@@ -156,32 +150,29 @@ class CP2K(Calculator):
         # Convert 3x3 stress tensor to Voigt form as required by ASE
         stress = np.array([stress[0, 0], stress[1, 1], stress[2, 2],
                            stress[1, 2], stress[0, 2], stress[0, 1]])
-        self.results['stress'] = stress * Hartree / Bohr**3
+        self.results["stress"] = stress * Hartree / Bohr**3
 
 
     #---------------------------------------------------------------------------
     def _create_force_env(self):
         assert(self._force_env_id is None)
-        inp = self._generate_input()
-
-        if(self._debug):
-            print inp
-        fd, inp_fn = mkstemp(suffix=".inp")
-        f = os.fdopen(fd, "w")
-        f.write(inp)
-        f.close()
-
         label_dir = path.dirname(self.label)
         if(len(label_dir)>0 and not path.exists(label_dir)):
             print "Creating directory: "+label_dir
             os.makedirs(label_dir) # cp2k expects dirs to exist
-        out_fn = self.parameters.txt
-        if(out_fn=="-"): out_fn = "__STD_OUT__"
+
+        inp = self._generate_input()
+        if(self._debug): print inp
+        inp_fn = self.label+".inp"
+        f = open(inp_fn, "w")
+        f.write(inp)
+        f.close()
+
+        out_fn = self.label+".out"
         self._send("LOAD %s %s"%(inp_fn, out_fn))
         self._force_env_id = int(self._recv())
         assert(self._force_env_id > 0)
         assert(self._recv() == "* READY")
-        os.remove(inp_fn)
 
 
     #---------------------------------------------------------------------------
@@ -196,7 +187,7 @@ class CP2K(Calculator):
     def _generate_input(self):
         p = self.parameters
 
-        root = parse_input("")
+        root = parse_input(p.inp)
         root.add_keyword("GLOBAL", "PROJECT "+self.label)
         root.add_keyword("FORCE_EVAL", "METHOD Quickstep")
         root.add_keyword("FORCE_EVAL", "STRESS_TENSOR ANALYTICAL")
@@ -207,8 +198,9 @@ class CP2K(Calculator):
         root.add_keyword("FORCE_EVAL/DFT/MGRID", "CUTOFF [eV] %.3f"%p.cutoff)
         root.add_keyword("FORCE_EVAL/DFT/SCF",  "MAX_SCF %d"%p.max_scf)
 
+        #TODO: is this correct?
         if(any(self.atoms.get_initial_magnetic_moments()!=0)):
-            raise(NotImplementedError("Magmetic moments not implemented"))
+            root.add_keyword("FORCE_EVAL/DFT", "UNRESTRICTED_KOHN_SHAM ON")
 
         if(p.charge != 0):
             root.add_keyword("FORCE_EVAL/DFT", "CHARGE %d"%p.charge)
@@ -216,17 +208,11 @@ class CP2K(Calculator):
         if(root.get_subsection("FORCE_EVAL/SUBSYS")):
             raise(Exception("Section SUBSYS exists already"))
 
-        valence_electrons = self._parse_basis_set()
-
         # write coords
         n_electrons = 0
         for elem, pos in zip(self.atoms.get_chemical_symbols(), self.atoms.get_positions()):
-            n_electrons += valence_electrons[(elem, p.basis_set)]
             line = "%s  %.10f   %.10f   %.10f"%(elem, pos[0], pos[1], pos[2])
             root.add_keyword("FORCE_EVAL/SUBSYS/COORD", line, unique=False)
-
-        if(n_electrons%2 != 0): #TODO is this the proper way?
-            root.add_keyword("FORCE_EVAL/DFT", "SPIN_POLARIZED .TRUE.")
 
         # write cell
         pbc = "".join([a for a,b in zip("XYZ",self.atoms.get_pbc()) if b])
@@ -240,9 +226,7 @@ class CP2K(Calculator):
         # determine pseudo-potential
         potential = p.pseudo_potential
         if(p.pseudo_potential.lower() == "auto"):
-            if(p.xc.upper() == "LDA"):
-                potential = "GTH-PADE"
-            elif(p.xc.upper() in ("PADE", "BP", "BLYP", "PBE",)):
+            if(p.xc.upper() in ("LDA", "PADE", "BP", "BLYP", "PBE",)):
                 potential = "GTH-"+p.xc.upper()
             else:
                 warn("No matching pseudo potential found, falling back to GTH-PBE", RuntimeWarning)
@@ -253,31 +237,11 @@ class CP2K(Calculator):
         for elem in set(self.atoms.get_chemical_symbols()):
             s = InputSection(name="KIND", params=elem)
             s.keywords.append("BASIS_SET "+p.basis_set)
-            q = valence_electrons[(elem, p.basis_set)]
-            s.keywords.append("POTENTIAL %s-q%d"%(potential, q))
+            s.keywords.append("POTENTIAL "+potential)
             subsys.subsections.append(s)
 
         output_lines = ["!!! Generated by ASE !!!"] + root.write()
         return("\n".join(output_lines))
-
-
-    #---------------------------------------------------------------------------
-    def _parse_basis_set(self):
-        """Parses basis_sets and returns number of valence electrons"""
-        valence_electrons = {}
-        lines = open(self.parameters.basis_set_file).readlines()
-        for line in lines:
-            if(len(line.strip()) == 0): continue
-            if(line.startswith("#")): continue
-            if(line.strip()[0].isdigit()): continue
-
-            basis_set_id = tuple(line.split()[:2])
-            m = re.search("-q(\d+)",line)
-            if(m):
-                valence_electrons[basis_set_id] = int(m.group(1))
-
-        return(valence_electrons)
-
 
     #---------------------------------------------------------------------------
     def _send(self, line):
@@ -291,7 +255,7 @@ class CP2K(Calculator):
     def _recv(self):
         """Receive a line from the cp2k_shell"""
         assert(self._child.poll() is None) # child process still alive?
-        line = self._pipe.readline().strip()
+        line = self._child.stdout.readline().strip()
         if(self._debug): print("Received: "+line)
         return(line)
 
